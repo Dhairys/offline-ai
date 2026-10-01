@@ -1,0 +1,202 @@
+(() => {
+  const DEFAULT_MODEL = 'gemma3:4b';
+  const $ = id => document.getElementById(id);
+  const el = { app: $('app'), history: $('history'), messages: $('messages'), empty: $('empty'), scroller: $('scroller'),
+    input: $('input'), send: $('sendBtn'), stop: $('stopBtn'), status: $('status'), statusText: $('statusText'), select: $('modelSelect') };
+
+  let chats = load('offlineai.chats', []);
+  let activeId = localStorage.getItem('offlineai.active');
+  let model = localStorage.getItem('offlineai.model') || DEFAULT_MODEL;
+  let installed = [], generating = false, controller = null;
+
+  function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } }
+  function save() {
+    try { localStorage.setItem('offlineai.chats', JSON.stringify(chats)); localStorage.setItem('offlineai.active', activeId || ''); } catch {}
+  }
+  const active = () => chats.find(c => c.id === activeId);
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  /* ---------- Markdown ---------- */
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function inline(s) {
+    const codes = [];
+    s = s.replace(/`([^`\n]+)`/g, (_, c) => (codes.push(c), `\u0000${codes.length - 1}\u0000`));
+    s = esc(s)
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`);
+  }
+  function md(text) {
+    const out = [], lines = text.split('\n');
+    let i = 0, para = [];
+    const flush = () => { if (para.length) { out.push(`<p>${inline(para.join('\n')).replace(/\n/g, '<br>')}</p>`); para = []; } };
+    while (i < lines.length) {
+      const line = lines[i], fence = line.match(/^\s*```(\S*)/);
+      if (fence) {
+        flush(); const code = []; i++;
+        while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+        i++;
+        out.push(`<div class="codeblock"><div class="codehead"><span>${esc(fence[1] || 'code')}</span><button class="copy">Copy</button></div><pre><code>${esc(code.join('\n'))}</code></pre></div>`);
+        continue;
+      }
+      const h = line.match(/^(#{1,3})\s+(.*)/);
+      const li = line.match(/^\s*([-*]|\d+\.)\s+(.*)/);
+      if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; }
+      else if (li) {
+        flush(); const tag = /\d/.test(li[1]) ? 'ol' : 'ul', items = [];
+        while (i < lines.length) {
+          const m = lines[i].match(/^\s*([-*]|\d+\.)\s+(.*)/);
+          if (!m || (/\d/.test(m[1]) ? 'ol' : 'ul') !== tag) break;
+          items.push(`<li>${inline(m[2])}</li>`); i++;
+        }
+        out.push(`<${tag}>${items.join('')}</${tag}>`);
+      }
+      else if (!line.trim()) { flush(); i++; }
+      else { para.push(line); i++; }
+    }
+    flush();
+    return out.join('');
+  }
+
+  /* ---------- Rendering ---------- */
+  function msgNode(m) {
+    const d = document.createElement('div');
+    if (m.role === 'user') { d.className = 'msg user'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
+    else if (m.error) { d.className = 'msg ai error'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
+    else { d.className = 'msg ai'; d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"></div>'; d.querySelector('.body').innerHTML = md(m.content); }
+    return d;
+  }
+  function renderChat() {
+    const c = active();
+    el.messages.innerHTML = '';
+    (c ? c.messages : []).forEach(m => el.messages.appendChild(msgNode(m)));
+    el.empty.style.display = c && c.messages.length ? 'none' : 'flex';
+    scrollDown(true);
+  }
+  function renderHistory() {
+    el.history.innerHTML = '';
+    chats.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'item' + (c.id === activeId ? ' active' : '');
+      row.innerHTML = '<button class="t"></button><button class="x" aria-label="Delete chat">×</button>';
+      row.querySelector('.t').textContent = c.title;
+      row.querySelector('.t').onclick = () => { if (generating) return; activeId = c.id; save(); renderAll(); el.app.classList.remove('open'); };
+      row.querySelector('.x').onclick = () => { if (generating) return; chats = chats.filter(x => x.id !== c.id); if (activeId === c.id) activeId = chats[0]?.id || null; save(); renderAll(); };
+      el.history.appendChild(row);
+    });
+  }
+  const renderAll = () => { renderHistory(); renderChat(); };
+  function scrollDown(force) {
+    const s = el.scroller;
+    if (force || s.scrollHeight - s.scrollTop - s.clientHeight < 140) { s.style.scrollBehavior = 'auto'; s.scrollTop = s.scrollHeight; }
+  }
+
+  /* ---------- Models & status ---------- */
+  const pretty = n => n === 'gemma3:4b' ? 'Gemma 3 4B' : n;
+  function setStatus(kind, text) { el.status.className = 'status ' + kind; el.statusText.textContent = text; }
+  async function refreshModels() {
+    try {
+      const r = await fetch('/api/models');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      installed = d.models.map(m => m.name);
+      setStatus(installed.length ? 'ok' : 'nomodel', installed.length ? 'Ollama Connected' : 'No Model Installed');
+    } catch { installed = []; setStatus('off', 'Ollama Offline'); }
+    const names = [...new Set([DEFAULT_MODEL, ...installed])];
+    if (!names.includes(model)) model = DEFAULT_MODEL;
+    el.select.innerHTML = '';
+    names.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = pretty(n) + (installed.includes(n) ? '' : ' (not installed)');
+      el.select.appendChild(o);
+    });
+    el.select.value = model;
+  }
+  el.select.onchange = () => { model = el.select.value; localStorage.setItem('offlineai.model', model); };
+
+  /* ---------- Chat ---------- */
+  function setBusy(b) {
+    generating = b; el.input.disabled = b; el.send.hidden = b; el.stop.hidden = !b;
+    if (!b) el.input.focus();
+  }
+  function newChat() {
+    if (generating) return;
+    const c = active();
+    if (c && !c.messages.length) return renderAll();
+    const n = { id: uid(), title: 'New chat', messages: [] };
+    chats.unshift(n); activeId = n.id; save(); renderAll(); el.input.focus();
+  }
+
+  async function send(text) {
+    text = text.trim();
+    if (!text || generating) return;
+    let c = active();
+    if (!c) { newChat(); c = active(); }
+    if (!c.messages.length) c.title = text.replace(/\s+/g, ' ').slice(0, 40);
+    c.messages.push({ role: 'user', content: text });
+    const reply = { role: 'assistant', content: '' };
+    save(); renderHistory(); el.empty.style.display = 'none';
+    el.messages.appendChild(msgNode(c.messages[c.messages.length - 1]));
+    const node = msgNode(reply), body = node.querySelector('.body');
+    body.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    el.messages.appendChild(node); scrollDown(true);
+    el.input.value = ''; autosize(); setBusy(true);
+
+    controller = new AbortController();
+    let pending = false;
+    const paint = () => { pending = false; body.innerHTML = md(reply.content); scrollDown(); };
+    const history = c.messages.filter(m => !m.error).map(m => ({ role: m.role, content: m.content }));
+    let failure = null;
+    try {
+      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages: history }), signal: controller.signal });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Request failed (${r.status}).`); }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      const handle = line => {
+        if (!line.trim()) return;
+        let j; try { j = JSON.parse(line); } catch { return; }
+        if (j.error) throw new Error(j.error);
+        if (j.message?.content) { reply.content += j.message.content; if (!pending) { pending = true; requestAnimationFrame(paint); } }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n'); buf = parts.pop();
+        parts.forEach(handle);
+      }
+      handle(buf);
+    } catch (e) {
+      if (e.name !== 'AbortError') failure = e.message === 'Failed to fetch' ? 'Cannot reach the Offline AI server. Is "npm start" still running?' : e.message;
+    }
+    controller = null;
+    paint();
+    if (reply.content) c.messages.push(reply);
+    else if (!failure) body.closest('.msg').remove();
+    if (failure) { const err = { role: 'assistant', content: failure, error: true }; c.messages.push(err); node.replaceWith(msgNode(err)); }
+    else if (reply.content) body.innerHTML = md(reply.content);
+    save(); setBusy(false); scrollDown(true);
+    if (failure) refreshModels();
+  }
+
+  /* ---------- Events ---------- */
+  function autosize() { el.input.style.height = 'auto'; el.input.style.height = Math.min(el.input.scrollHeight, 200) + 'px'; }
+  el.input.addEventListener('input', autosize);
+  el.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(el.input.value); } });
+  el.send.onclick = () => send(el.input.value);
+  el.stop.onclick = () => controller && controller.abort();
+  $('newChat').onclick = () => { newChat(); el.app.classList.remove('open'); };
+  $('clearAll').onclick = () => { if (!generating && chats.length && confirm('Delete all chats on this device?')) { chats = []; activeId = null; save(); renderAll(); } };
+  $('menuBtn').onclick = () => el.app.classList.add('open');
+  $('scrim').onclick = () => el.app.classList.remove('open');
+  document.querySelectorAll('.card').forEach(b => b.onclick = () => { el.input.value = b.dataset.prompt; autosize(); el.input.focus(); });
+  el.messages.addEventListener('click', e => {
+    if (!e.target.classList.contains('copy')) return;
+    const code = e.target.closest('.codeblock').querySelector('code').textContent;
+    navigator.clipboard.writeText(code).then(() => { e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1500); });
+  });
+
+  if (!active()) activeId = chats[0]?.id || null;
+  renderAll(); refreshModels(); setInterval(refreshModels, 10000);
+})();

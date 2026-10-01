@@ -1,0 +1,10 @@
+{
+  "name": "offline-ai",
+  "version": "1.0.0",
+  "description": "A private, local AI assistant powered by Gemma 3 4B through Ollama.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": { "express": "^4.19.2" }
+}
