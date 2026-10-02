@@ -62,3 +62,12 @@ PowerShell example: `$env:PORT=4000; npm start`
 
 ## Privacy and GitHub
 Ollama runs the model locally and stores model files in its own folder (on Windows: `%USERPROFILE%\.ollama`). **Do not commit model files to GitHub.** They are large, and this project never needs them in the repository. The `.gitignore` already excludes `node_modules`, `.env`, and common model formats. Chats live only in your browser's `localStorage`.
+
+## Image generation (optional, ComfyUI)
+Offline AI can generate images through a local [ComfyUI](https://www.comfy.org) install. Nothing leaves your computer.
+
+1. Start ComfyUI (for your hardware, `run_cpu.bat` with `--cpu`). It must listen on `http://127.0.0.1:8188`.
+2. Put a `.safetensors` checkpoint (for example SD Turbo) in `ComfyUI\models\checkpoints`.
+3. In Offline AI, click **Image** at the top, pick the checkpoint, set size/steps/CFG, and describe an image.
+
+Turbo models default to 2 steps and CFG 1; other models default to 20 steps and CFG 7. CPU generation can take minutes. Generated images are saved in ComfyUI's `output` folder. Use `COMFY_HOST` to change the ComfyUI address.

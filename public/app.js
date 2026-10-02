@@ -8,6 +8,7 @@
   let activeId = localStorage.getItem('offlineai.active');
   let model = localStorage.getItem('offlineai.model') || DEFAULT_MODEL;
   let installed = [], generating = false, controller = null;
+  let mode = 'chat', ckpts = [], comfyOk = false, ollamaState = 'off', ckpt = localStorage.getItem('offlineai.ckpt') || '';
 
   function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } }
   function save() {
@@ -63,6 +64,12 @@
   function msgNode(m) {
     const d = document.createElement('div');
     if (m.role === 'user') { d.className = 'msg user'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
+    else if (m.image) {
+      d.className = 'msg ai';
+      d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"><img class="gen" alt="Generated image"><div class="cap"></div><a class="dl" download="offline-ai.png">Download</a></div>';
+      const im = d.querySelector('img'); im.src = m.image; im.onload = () => scrollDown(true);
+      d.querySelector('.cap').textContent = m.content; d.querySelector('.dl').href = m.image;
+    }
     else if (m.error) { d.className = 'msg ai error'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
     else { d.className = 'msg ai'; d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"></div>'; d.querySelector('.body').innerHTML = md(m.content); }
     return d;
@@ -101,8 +108,8 @@
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       installed = d.models.map(m => m.name);
-      setStatus(installed.length ? 'ok' : 'nomodel', installed.length ? 'Ollama Connected' : 'No Model Installed');
-    } catch { installed = []; setStatus('off', 'Ollama Offline'); }
+      ollamaState = installed.length ? 'ok' : 'nomodel';
+    } catch { installed = []; ollamaState = 'off'; }
     const names = [...new Set([DEFAULT_MODEL, ...installed])];
     if (!names.includes(model)) model = DEFAULT_MODEL;
     el.select.innerHTML = '';
@@ -112,8 +119,10 @@
       el.select.appendChild(o);
     });
     el.select.value = model;
+    if (mode === 'image') fillSelect();
+    updateStatus();
   }
-  el.select.onchange = () => { model = el.select.value; localStorage.setItem('offlineai.model', model); };
+  el.select.onchange = () => { if (mode === 'image') { ckpt = el.select.value; localStorage.setItem('offlineai.ckpt', ckpt); applyDefaults(); return; } model = el.select.value; localStorage.setItem('offlineai.model', model); };
 
   /* ---------- Chat ---------- */
   function setBusy(b) {
@@ -131,6 +140,7 @@
   async function send(text) {
     text = text.trim();
     if (!text || generating) return;
+    if (mode === 'image') return sendImage(text);
     let c = active();
     if (!c) { newChat(); c = active(); }
     if (!c.messages.length) c.title = text.replace(/\s+/g, ' ').slice(0, 40);
@@ -146,7 +156,7 @@
     controller = new AbortController();
     let pending = false;
     const paint = () => { pending = false; body.innerHTML = md(reply.content); scrollDown(); };
-    const history = c.messages.filter(m => !m.error).map(m => ({ role: m.role, content: m.content }));
+    const history = c.messages.filter(m => !m.error && !m.image && !m.img).map(m => ({ role: m.role, content: m.content }));
     let failure = null;
     try {
       const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages: history }), signal: controller.signal });
@@ -180,6 +190,74 @@
     if (failure) refreshModels();
   }
 
+  /* ---------- Image mode ---------- */
+  async function refreshImage() {
+    try {
+      const r = await fetch('/api/image/models'), d = await r.json();
+      if (!r.ok) throw new Error();
+      ckpts = d.models; comfyOk = true;
+    } catch { ckpts = []; comfyOk = false; }
+    fillSelect(); updateStatus();
+  }
+  function fillSelect() {
+    if (mode !== 'image') return;
+    el.select.innerHTML = '';
+    (ckpts.length ? ckpts : ['No checkpoints found']).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; el.select.appendChild(o); });
+    if (!ckpts.includes(ckpt)) ckpt = ckpts[0] || '';
+    el.select.value = ckpt; applyDefaults();
+  }
+  function applyDefaults() {
+    const turbo = /turbo|lightning|lcm/i.test(ckpt);
+    $('imgSteps').value = turbo ? 2 : 20; $('imgCfg').value = turbo ? 1 : 7;
+  }
+  function updateStatus() {
+    if (mode === 'image') {
+      if (!comfyOk) return setStatus('off', 'ComfyUI Offline');
+      return ckpts.length ? setStatus('ok', 'ComfyUI Connected') : setStatus('nomodel', 'No Checkpoint Found');
+    }
+    setStatus(ollamaState, { ok: 'Ollama Connected', nomodel: 'No Model Installed', off: 'Ollama Offline' }[ollamaState]);
+  }
+  function setMode(m) {
+    if (generating) return;
+    mode = m;
+    document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+    $('imgOpts').hidden = m !== 'image';
+    el.input.placeholder = m === 'image' ? 'Describe an image…' : 'Message your local AI…';
+    if (m === 'image') { fillSelect(); updateStatus(); refreshImage(); } else refreshModels();
+  }
+  async function sendImage(text) {
+    let c = active();
+    if (!c) { newChat(); c = active(); }
+    if (!c.messages.length) c.title = '🖼 ' + text.replace(/\s+/g, ' ').slice(0, 38);
+    c.messages.push({ role: 'user', content: text, img: true });
+    save(); renderHistory(); el.empty.style.display = 'none';
+    el.messages.appendChild(msgNode(c.messages[c.messages.length - 1]));
+    const node = document.createElement('div'); node.className = 'msg ai';
+    node.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"><span class="typing"><i></i><i></i><i></i></span> <span class="wait">Generating image…</span></div>';
+    el.messages.appendChild(node); scrollDown(true);
+    el.input.value = ''; autosize(); setBusy(true);
+    const t0 = Date.now(), wait = node.querySelector('.wait');
+    const timer = setInterval(() => wait.textContent = `Generating image… ${Math.floor((Date.now() - t0) / 1000)}s (CPU can take minutes)`, 1000);
+    controller = new AbortController();
+    let url = null, failure = null;
+    try {
+      const size = +$('imgSize').value;
+      const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ prompt: text, checkpoint: ckpt, width: size, height: size, steps: +$('imgSteps').value, cfg: +$('imgCfg').value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Request failed (${r.status}).`);
+      url = d.url;
+    } catch (e) {
+      if (e.name !== 'AbortError') failure = e.message === 'Failed to fetch' ? 'Cannot reach the Offline AI server. Is "npm start" still running?' : e.message;
+    }
+    clearInterval(timer); controller = null;
+    const m = url ? { role: 'assistant', content: text, image: url } : failure ? { role: 'assistant', content: failure, error: true } : null;
+    if (m) { c.messages.push(m); node.replaceWith(msgNode(m)); } else node.remove();
+    save(); setBusy(false); scrollDown(true);
+    if (failure) refreshImage();
+  }
+  document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
   /* ---------- Events ---------- */
   function autosize() { el.input.style.height = 'auto'; el.input.style.height = Math.min(el.input.scrollHeight, 200) + 'px'; }
   el.input.addEventListener('input', autosize);
@@ -198,5 +276,5 @@
   });
 
   if (!active()) activeId = chats[0]?.id || null;
-  renderAll(); refreshModels(); setInterval(refreshModels, 10000);
+  renderAll(); refreshModels(); setInterval(() => { refreshModels(); if (mode === 'image') refreshImage(); }, 10000);
 })();
