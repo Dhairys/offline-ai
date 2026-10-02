@@ -8,7 +8,7 @@
   let activeId = localStorage.getItem('offlineai.active');
   let model = localStorage.getItem('offlineai.model') || DEFAULT_MODEL;
   let installed = [], generating = false, controller = null;
-  let mode = 'chat', ckpts = [], comfyOk = false, ollamaState = 'off', ckpt = localStorage.getItem('offlineai.ckpt') || '';
+  let mode = 'chat', ckpts = [], comfyOk = false, ollamaState = 'off', ckpt = localStorage.getItem('offlineai.ckpt') || '', attached = null;
 
   function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } }
   function save() {
@@ -66,9 +66,9 @@
     if (m.role === 'user') { d.className = 'msg user'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
     else if (m.image) {
       d.className = 'msg ai';
-      d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"><img class="gen" alt="Generated image"><div class="cap"></div><a class="dl" download="offline-ai.png">Download</a></div>';
+      d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"><img class="gen" alt="Generated image"><div class="cap"></div><a class="dl" download="offline-ai.png">Download</a><button class="edit">Edit this</button></div>';
       const im = d.querySelector('img'); im.src = m.image; im.onload = () => scrollDown(true);
-      d.querySelector('.cap').textContent = m.content; d.querySelector('.dl').href = m.image;
+      d.querySelector('.cap').textContent = m.content; d.querySelector('.dl').href = m.image; d.querySelector('.edit').dataset.src = m.image;
     }
     else if (m.error) { d.className = 'msg ai error'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
     else { d.className = 'msg ai'; d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"></div>'; d.querySelector('.body').innerHTML = md(m.content); }
@@ -223,13 +223,14 @@
     document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
     $('imgOpts').hidden = m !== 'image';
     el.input.placeholder = m === 'image' ? 'Describe an image…' : 'Message your local AI…';
+    $('attachBtn').hidden = m !== 'image'; if (m !== 'image') detach();
     if (m === 'image') { fillSelect(); updateStatus(); refreshImage(); } else refreshModels();
   }
   async function sendImage(text) {
     let c = active();
     if (!c) { newChat(); c = active(); }
     if (!c.messages.length) c.title = '🖼 ' + text.replace(/\s+/g, ' ').slice(0, 38);
-    c.messages.push({ role: 'user', content: text, img: true });
+    c.messages.push({ role: 'user', content: (attached ? '✏️ ' : '') + text, img: true });
     save(); renderHistory(); el.empty.style.display = 'none';
     el.messages.appendChild(msgNode(c.messages[c.messages.length - 1]));
     const node = document.createElement('div'); node.className = 'msg ai';
@@ -241,12 +242,17 @@
     controller = new AbortController();
     let url = null, failure = null;
     try {
-      const size = +$('imgSize').value;
+      const size = +$('imgSize').value; let width = size, height = size, extra = {};
+      if (attached) {
+        const k = size / Math.max(attached.w, attached.h);
+        width = Math.max(256, Math.round(attached.w * k / 64) * 64); height = Math.max(256, Math.round(attached.h * k / 64) * 64);
+        extra = { image: attached.data, denoise: +$('imgStr').value };
+      }
       const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ prompt: text, checkpoint: ckpt, width: size, height: size, steps: +$('imgSteps').value, cfg: +$('imgCfg').value }) });
+        body: JSON.stringify({ prompt: text, checkpoint: ckpt, width, height, steps: +$('imgSteps').value, cfg: +$('imgCfg').value, ...extra }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `Request failed (${r.status}).`);
-      url = d.url;
+      url = d.url; if (attached) detach();
     } catch (e) {
       if (e.name !== 'AbortError') failure = e.message === 'Failed to fetch' ? 'Cannot reach the Offline AI server. Is "npm start" still running?' : e.message;
     }
@@ -257,6 +263,29 @@
     if (failure) refreshImage();
   }
   document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  function attachSrc(src) {
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 768 / Math.max(im.width, im.height)), w = Math.round(im.width * k), h = Math.round(im.height * k);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(im, 0, 0, w, h);
+      attached = { data: cv.toDataURL('image/jpeg', 0.92), w, h };
+      $('chipImg').src = attached.data; $('chip').hidden = false; $('strLbl').hidden = false;
+      el.input.placeholder = 'Describe the change…'; el.input.focus();
+    };
+    im.src = src;
+  }
+  function detach() {
+    attached = null; $('chip').hidden = true; $('strLbl').hidden = true; $('fileIn').value = '';
+    el.input.placeholder = mode === 'image' ? 'Describe an image…' : 'Message your local AI…';
+  }
+  $('attachBtn').onclick = () => $('fileIn').click();
+  $('fileIn').onchange = e => { const f = e.target.files[0]; if (f) attachSrc(URL.createObjectURL(f)); };
+  $('chipX').onclick = detach;
+  el.messages.addEventListener('click', e => {
+    if (!e.target.classList.contains('edit') || generating) return;
+    if (mode !== 'image') setMode('image');
+    attachSrc(e.target.dataset.src);
+  });
 
   /* ---------- Events ---------- */
   function autosize() { el.input.style.height = 'auto'; el.input.style.height = Math.min(el.input.scrollHeight, 200) + 'px'; }

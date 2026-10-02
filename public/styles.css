@@ -83,3 +83,22 @@ button{cursor:pointer;background:none;border:0}
  .messages{padding:8px 16px 30px}.composer-wrap{padding:0 12px 12px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+.seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px;margin-left:auto}
+.seg button{padding:4px 14px;border-radius:7px;font-size:14px;color:var(--dim)}
+.seg button.on{background:var(--acc);color:var(--accInk);font-weight:600}
+.imgopts{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;font-size:13px;color:var(--dim)}
+.imgopts select,.imgopts input{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 8px;width:72px}
+img.gen{display:block;max-width:100%;border-radius:12px;border:1px solid var(--line)}
+.cap{font-size:13px;color:var(--dim);margin-top:8px}
+.dl{font-size:13px;color:var(--acc)}
+.wait{color:var(--dim);font-size:13px}
+
+[hidden]{display:none!important}
+
+.attach{width:34px;height:34px;border-radius:50%;color:var(--dim);display:grid;place-items:center;flex:none;margin-left:-8px}
+.attach:hover{color:var(--acc)}
+.chip{display:flex;align-items:center;gap:10px;width:max-content;max-width:100%;margin:0 auto 10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 8px;font-size:13px;color:var(--dim)}
+.chip img{width:34px;height:34px;object-fit:cover;border-radius:7px}
+.chip button{font-size:18px;color:var(--dim);padding:0 6px}.chip button:hover{color:var(--err)}
+.edit{font-size:13px;color:var(--acc);margin-left:12px}

@@ -71,3 +71,6 @@ Offline AI can generate images through a local [ComfyUI](https://www.comfy.org) 
 3. In Offline AI, click **Image** at the top, pick the checkpoint, set size/steps/CFG, and describe an image.
 
 Turbo models default to 2 steps and CFG 1; other models default to 20 steps and CFG 7. CPU generation can take minutes. Generated images are saved in ComfyUI's `output` folder. Use `COMFY_HOST` to change the ComfyUI address.
+
+### Image editing
+In **Image** mode, click the paperclip to attach a picture (or press **Edit this** under a generated image), describe the change, and send. This is img2img: lower **Edit strength** keeps more of the original, higher changes more. It works with ordinary Stable Diffusion checkpoints.

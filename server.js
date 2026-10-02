@@ -36,7 +36,7 @@ app.post('/api/chat', async (req, res) => {
     const r = await fetch(`${OLLAMA}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({ model, messages, stream: true, options: { num_ctx: 8192 } }),
       signal: ac.signal,
     });
 
@@ -86,6 +86,8 @@ app.post('/api/image', async (req, res) => {
   }
   const width = Math.round(num(b.width, 512, 256, 1024) / 64) * 64;
   const height = Math.round(num(b.height, 512, 256, 1024) / 64) * 64;
+  const m = b.image ? /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(b.image) : null;
+  if (b.image && !m) return res.status(400).json({ error: 'Unsupported image. Use PNG, JPEG or WebP.' });
   const wf = {
     1: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: b.checkpoint } },
     2: { class_type: 'CLIPTextEncode', inputs: { text: b.prompt, clip: ['1', 1] } },
@@ -107,6 +109,19 @@ app.post('/api/image', async (req, res) => {
   });
 
   try {
+    if (m) {
+      const fd = new FormData();
+      fd.append('image', new Blob([Buffer.from(m[2], 'base64')], { type: `image/${m[1]}` }), `offlineai_${Date.now()}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
+      const u = await fetch(`${COMFY}/upload/image`, { method: 'POST', body: fd, signal: ac.signal });
+      const ud = await u.json().catch(() => ({}));
+      if (!u.ok || !ud.name) return res.status(502).json({ error: 'ComfyUI could not accept the uploaded image.' });
+      wf[8] = { class_type: 'LoadImage', inputs: { image: ud.name } };
+      wf[9] = { class_type: 'ImageScale', inputs: { image: ['8', 0], upscale_method: 'lanczos', width, height, crop: 'center' } };
+      wf[10] = { class_type: 'VAEEncode', inputs: { pixels: ['9', 0], vae: ['1', 2] } };
+      wf[5].inputs.latent_image = ['10', 0];
+      wf[5].inputs.denoise = num(b.denoise, 0.6, 0.05, 1);
+      delete wf[4];
+    }
     const r = await fetch(`${COMFY}/prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: wf }), signal: ac.signal });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: d.error?.message || 'ComfyUI rejected the request. Check the checkpoint name.' });
