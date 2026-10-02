@@ -8,7 +8,7 @@
   let activeId = localStorage.getItem('offlineai.active');
   let model = localStorage.getItem('offlineai.model') || DEFAULT_MODEL;
   let installed = [], generating = false, controller = null;
-  let mode = 'chat', ckpts = [], comfyOk = false, ollamaState = 'off', ckpt = localStorage.getItem('offlineai.ckpt') || '', attached = null;
+  let mode = 'chat', ckpts = [], comfyOk = false, ollamaState = 'off', ckpt = localStorage.getItem('offlineai.ckpt') || '', attached = null, warmed = '';
 
   function load(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } }
   function save() {
@@ -71,23 +71,26 @@
       d.querySelector('.cap').textContent = m.content; d.querySelector('.dl').href = m.image; d.querySelector('.edit').dataset.src = m.image;
     }
     else if (m.error) { d.className = 'msg ai error'; d.innerHTML = '<div class="body"></div>'; d.firstChild.textContent = m.content; }
-    else { d.className = 'msg ai'; d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"></div>'; d.querySelector('.body').innerHTML = md(m.content); }
+    else { d.className = 'msg ai'; d.innerHTML = '<svg class="logo av"><use href="#logo"/></svg><div class="body"></div>'; d.querySelector('.body').innerHTML = md(m.content) + '<div class="acts"><button class="act" data-a="copy">Copy</button><button class="act" data-a="regen">Regenerate</button></div>'; }
     return d;
   }
   function renderChat() {
     const c = active();
     el.messages.innerHTML = '';
     (c ? c.messages : []).forEach(m => el.messages.appendChild(msgNode(m)));
+    const rg = el.messages.querySelectorAll('[data-a=regen]'); rg.forEach((b, i) => b.hidden = i !== rg.length - 1);
     el.empty.style.display = c && c.messages.length ? 'none' : 'flex';
     scrollDown(true);
   }
   function renderHistory() {
     el.history.innerHTML = '';
-    chats.forEach(c => {
+    const q = $('search').value.trim().toLowerCase();
+    chats.filter(c => !q || c.title.toLowerCase().includes(q) || c.messages.some(m => m.content.toLowerCase().includes(q))).forEach(c => {
       const row = document.createElement('div');
       row.className = 'item' + (c.id === activeId ? ' active' : '');
       row.innerHTML = '<button class="t"></button><button class="x" aria-label="Delete chat">×</button>';
       row.querySelector('.t').textContent = c.title;
+      row.querySelector('.t').ondblclick = () => { const n = prompt('Rename chat', c.title); if (n && n.trim()) { c.title = n.trim().slice(0, 60); save(); renderHistory(); } };
       row.querySelector('.t').onclick = () => { if (generating) return; activeId = c.id; save(); renderAll(); el.app.classList.remove('open'); };
       row.querySelector('.x').onclick = () => { if (generating) return; chats = chats.filter(x => x.id !== c.id); if (activeId === c.id) activeId = chats[0]?.id || null; save(); renderAll(); };
       el.history.appendChild(row);
@@ -121,8 +124,9 @@
     el.select.value = model;
     if (mode === 'image') fillSelect();
     updateStatus();
+    if (installed.includes(model) && warmed !== model) { warmed = model; fetch('/api/warm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) }).catch(() => {}); }
   }
-  el.select.onchange = () => { if (mode === 'image') { ckpt = el.select.value; localStorage.setItem('offlineai.ckpt', ckpt); applyDefaults(); return; } model = el.select.value; localStorage.setItem('offlineai.model', model); };
+  el.select.onchange = () => { if (mode === 'image') { ckpt = el.select.value; localStorage.setItem('offlineai.ckpt', ckpt); applyDefaults(); return; } model = el.select.value; localStorage.setItem('offlineai.model', model); warmed = ''; refreshModels(); };
 
   /* ---------- Chat ---------- */
   function setBusy(b) {
@@ -156,7 +160,9 @@
     controller = new AbortController();
     let pending = false;
     const paint = () => { pending = false; body.innerHTML = md(reply.content); scrollDown(); };
-    const history = c.messages.filter(m => !m.error && !m.image && !m.img).map(m => ({ role: m.role, content: m.content }));
+    const history = c.messages.filter(m => !m.error && !m.image && !m.img).map(m => ({ role: m.role, content: m.content })).slice(-20);
+    const sys = (localStorage.getItem('offlineai.system') || '').trim();
+    if (sys) history.unshift({ role: 'system', content: sys });
     let failure = null;
     try {
       const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages: history }), signal: controller.signal });
@@ -186,7 +192,7 @@
     else if (!failure) body.closest('.msg').remove();
     if (failure) { const err = { role: 'assistant', content: failure, error: true }; c.messages.push(err); node.replaceWith(msgNode(err)); }
     else if (reply.content) body.innerHTML = md(reply.content);
-    save(); setBusy(false); scrollDown(true);
+    save(); setBusy(false); renderChat();
     if (failure) refreshModels();
   }
 
@@ -195,7 +201,7 @@
     try {
       const r = await fetch('/api/image/models'), d = await r.json();
       if (!r.ok) throw new Error();
-      ckpts = d.models; comfyOk = true;
+      ckpts = d.models; comfyOk = true; localStorage.setItem('offlineai.images', '1'); $('modeSeg').hidden = false;
     } catch { ckpts = []; comfyOk = false; }
     fillSelect(); updateStatus();
   }
@@ -216,6 +222,8 @@
       return ckpts.length ? setStatus('ok', 'ComfyUI Connected') : setStatus('nomodel', 'No Checkpoint Found');
     }
     setStatus(ollamaState, { ok: 'Ollama Connected', nomodel: 'No Model Installed', off: 'Ollama Offline' }[ollamaState]);
+    const nt = $('notice'), tips = { off: 'Ollama is not running. Install it from ollama.com and start it, then this page connects automatically.', nomodel: 'No model installed yet. Open PowerShell and run: ollama pull gemma3:4b' };
+    nt.hidden = ollamaState === 'ok'; nt.textContent = tips[ollamaState] || '';
   }
   function setMode(m) {
     if (generating) return;
@@ -304,6 +312,29 @@
     navigator.clipboard.writeText(code).then(() => { e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1500); });
   });
 
+  $('search').oninput = renderHistory;
+  $('themeBtn').onclick = () => { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = t; localStorage.setItem('offlineai.theme', t); };
+  $('settingsBtn').onclick = () => { $('sysText').value = localStorage.getItem('offlineai.system') || ''; $('settings').showModal(); };
+  $('sysCancel').onclick = () => $('settings').close();
+  $('sysSave').onclick = () => { localStorage.setItem('offlineai.system', $('sysText').value); $('settings').close(); };
+  $('exportBtn').onclick = () => {
+    const c = active(); if (!c || !c.messages.length) return;
+    const text = `# ${c.title}\n\n` + c.messages.filter(m => !m.error).map(m => `**${m.role === 'user' ? 'You' : 'Offline AI'}:**\n\n${m.content}`).join('\n\n---\n\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+    a.download = c.title.replace(/[^\w-]+/g, '_') + '.md'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  el.messages.addEventListener('click', e => {
+    const b = e.target.closest('.act'); if (!b) return;
+    const c = active(), i = [...el.messages.children].indexOf(b.closest('.msg'));
+    if (b.dataset.a === 'copy') navigator.clipboard.writeText(c.messages[i].content).then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1500); });
+    else if (b.dataset.a === 'regen' && !generating) {
+      while (c.messages.length && c.messages[c.messages.length - 1].role === 'assistant') c.messages.pop();
+      const last = c.messages.pop(); if (!last) return;
+      save(); renderChat(); if (mode !== 'chat') setMode('chat'); send(last.content);
+    }
+  });
+
   if (!active()) activeId = chats[0]?.id || null;
-  renderAll(); refreshModels(); setInterval(() => { refreshModels(); if (mode === 'image') refreshImage(); }, 10000);
+  $('modeSeg').hidden = !localStorage.getItem('offlineai.images');
+  renderAll(); refreshModels().then(refreshImage); setInterval(() => { refreshModels(); if (mode === 'image' || $('modeSeg').hidden) refreshImage(); }, 10000);
 })();

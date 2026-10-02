@@ -15,6 +15,8 @@ Browser → Express backend → Ollama → Gemma 3 4B → Express → Browser
 - Model dropdown filled from Ollama's `/api/tags`
 - Live status: Ollama Connected / Ollama Offline / No Model Installed
 - Responsive: desktop, tablet, mobile (sidebar behind a menu button)
+- Warm light/dark themes, custom instructions (memory), chat search, rename, export to Markdown, copy and regenerate
+- Image generation and editing are optional: without ComfyUI the app is chat-only and the Image tab stays hidden
 
 ## Setup
 
@@ -74,3 +76,11 @@ Turbo models default to 2 steps and CFG 1; other models default to 20 steps and 
 
 ### Image editing
 In **Image** mode, click the paperclip to attach a picture (or press **Edit this** under a generated image), describe the change, and send. This is img2img: lower **Edit strength** keeps more of the original, higher changes more. It works with ordinary Stable Diffusion checkpoints.
+
+## Performance tips
+- The model is pre-loaded when the page opens and kept in memory for 30 minutes, so replies after the first are faster.
+- Only the last 20 messages are sent to the model, which keeps replies quick in long chats.
+- Close heavy apps while generating; 16 GB of RAM is shared between the model and Windows.
+
+## Works without image generation
+Offline AI only needs **Node.js** and **Ollama with a chat model**. ComfyUI is optional: if it is not installed, the launcher skips it and the Image tab stays hidden. If Ollama or the model is missing, the home screen shows what to install.

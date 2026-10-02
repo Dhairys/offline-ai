@@ -36,7 +36,7 @@ app.post('/api/chat', async (req, res) => {
     const r = await fetch(`${OLLAMA}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true, options: { num_ctx: 8192 } }),
+      body: JSON.stringify({ model, messages, stream: true, options: { num_ctx: 8192 }, keep_alive: '30m' }),
       signal: ac.signal,
     });
 
@@ -63,6 +63,14 @@ app.post('/api/chat', async (req, res) => {
     res.write(JSON.stringify({ error: 'The connection to Ollama was interrupted.' }) + '\n');
     res.end();
   }
+});
+
+// Pre-load the model into memory so the first reply is faster
+app.post('/api/warm', (req, res) => {
+  const model = req.body && req.body.model;
+  if (typeof model !== 'string' || !model) return res.sendStatus(400);
+  fetch(`${OLLAMA}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, keep_alive: '30m' }) }).catch(() => {});
+  res.sendStatus(202);
 });
 
 /* ---------- Image generation via ComfyUI ---------- */

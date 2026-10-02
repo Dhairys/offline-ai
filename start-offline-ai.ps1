@@ -3,8 +3,11 @@ Set-Location $PSScriptRoot
 $Host.UI.RawUI.WindowTitle = 'Offline AI'
 
 # ===== EDIT THESE IF NEEDED =====
-$ComfyDir = 'G:\ComfyUI_windows_portable'   # folder that contains python_embeded
-$UseCpu   = $true                           # $false to try the Intel GPU
+# ComfyUI is optional. It is found automatically in these places (or set the COMFY_DIR environment variable):
+$ComfyDir = @($env:COMFY_DIR, 'G:\ComfyUI_windows_portable', "$PSScriptRoot\ComfyUI_windows_portable", "$PSScriptRoot\..\ComfyUI_windows_portable", "$env:USERPROFILE\ComfyUI_windows_portable") |
+  Where-Object { $_ -and (Test-Path (Join-Path $_ 'python_embeded\python.exe')) } | Select-Object -First 1
+$UseCpu   = $true
+$EnableImages = $true                      # $false = chat only, skip ComfyUI                           # $false to try the Intel GPU
 # ================================
 
 function Test-Port($p) { [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) }
@@ -25,16 +28,17 @@ else { Write-Host 'not found - is Ollama installed?' -ForegroundColor Yellow }
 
 # 2. ComfyUI (images) - runs hidden, never opens its own browser tab
 Line 'ComfyUI'
-$py = Join-Path $ComfyDir 'python_embeded\python.exe'
-if (Test-Port 8188) { Write-Host 'already running' -ForegroundColor Green }
-elseif (Test-Path $py) {
+$py = if ($ComfyDir) { Join-Path $ComfyDir 'python_embeded\python.exe' } else { '' }
+if (-not $EnableImages) { Write-Host 'off (chat only)' -ForegroundColor DarkGray }
+elseif (Test-Port 8188) { Write-Host 'already running' -ForegroundColor Green }
+elseif ($py -and (Test-Path $py)) {
   $a = @('-s', 'ComfyUI\main.py', '--windows-standalone-build', '--disable-auto-launch')
   if ($UseCpu) { $a += '--cpu' }
   Start-Process $py -ArgumentList $a -WorkingDirectory $ComfyDir -WindowStyle Hidden `
     -RedirectStandardOutput "$PSScriptRoot\comfyui.log" -RedirectStandardError "$PSScriptRoot\comfyui-error.log"
   Write-Host 'starting in background (image mode ready in about a minute)' -ForegroundColor Yellow
 }
-else { Write-Host "not found - edit `$ComfyDir in start-offline-ai.ps1" -ForegroundColor Yellow }
+else { Write-Host 'not installed - skipped (image mode is optional)' -ForegroundColor DarkGray }
 
 # 3. Offline AI website
 Line 'Website'

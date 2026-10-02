@@ -4,16 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Offline AI</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23c9f27a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2312130f'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23d97757'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ffffff'/%3E%3C/svg%3E">
+<script>document.documentElement.dataset.theme=localStorage.getItem('offlineai.theme')||'dark'</script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="logo" viewBox="0 0 32 32">
-    <rect width="32" height="32" rx="9" fill="#c9f27a"/>
-    <circle cx="16" cy="16" r="9" fill="none" stroke="#12130f" stroke-width="2" stroke-dasharray="40 16" stroke-linecap="round" transform="rotate(-50 16 16)"/>
-    <circle cx="16" cy="16" r="3.2" fill="#12130f"/>
-    <path d="M6 26 26 6" stroke="#12130f" stroke-width="2.2" stroke-linecap="round"/>
+    <rect width="32" height="32" rx="9" style="fill:var(--acc)"/>
+    <circle cx="16" cy="16" r="9" fill="none" style="stroke:var(--accInk)" stroke-width="2" stroke-dasharray="40 16" stroke-linecap="round" transform="rotate(-50 16 16)"/>
+    <circle cx="16" cy="16" r="3.2" style="fill:var(--accInk)"/>
+    <path d="M6 26 26 6" style="stroke:var(--accInk)" stroke-width="2.2" stroke-linecap="round"/>
   </symbol>
 </svg>
 
@@ -25,9 +26,11 @@
       <div><div class="brand-name">Offline AI</div><div class="brand-sub">Powered by Ollama</div></div>
     </div>
     <button class="new-chat" id="newChat">+ New Chat</button>
+    <input class="search" id="search" placeholder="Search chats" aria-label="Search chats">
     <div class="side-label">Chats</div>
     <nav class="history" id="history" aria-label="Chat history"></nav>
     <button class="clear-all" id="clearAll">Clear all chats</button>
+    <button class="clear-all" id="settingsBtn">⚙ Custom instructions</button>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">Checking Ollama…</span></div>
     <div class="side-foot">Local processing • No cloud API key</div>
   </aside>
@@ -38,7 +41,10 @@
       <div class="model-wrap">
         <select id="modelSelect" aria-label="Model"></select>
       </div>
-      <div class="seg" id="modeSeg"><button data-mode="chat" class="on">Chat</button><button data-mode="image">Image</button></div>
+      <div class="spacer"></div>
+      <div class="seg" id="modeSeg" hidden><button data-mode="chat" class="on">Chat</button><button data-mode="image">Image</button></div>
+      <button class="icon-btn" id="exportBtn" title="Export chat as Markdown" aria-label="Export chat">⤓</button>
+      <button class="icon-btn" id="themeBtn" title="Switch light/dark theme" aria-label="Toggle theme">◐</button>
     </header>
 
     <section class="scroller" id="scroller">
@@ -46,6 +52,7 @@
         <svg class="logo big"><use href="#logo"/></svg>
         <h1>Your local AI assistant</h1>
         <p>Private AI running directly on your computer.</p>
+        <div class="notice" id="notice" hidden></div>
         <div class="cards">
           <button class="card" data-prompt="Explain how a computer processor works, in simple terms."><b>Explain something</b><span>Break down any topic simply</span></button>
           <button class="card" data-prompt="Help me code a JavaScript function that removes duplicates from an array."><b>Help me code</b><span>Write, debug, and review code</span></button>
@@ -81,6 +88,12 @@
     </footer>
   </main>
 </div>
+<dialog id="settings">
+  <h2>Custom instructions</h2>
+  <p>Tell Gemma how to reply and what to remember about you. Sent with every chat and stored only on this device.</p>
+  <textarea id="sysText" rows="7" placeholder="e.g. My name is Sam and I'm learning Node.js. Keep answers short and practical."></textarea>
+  <div class="dlg-actions"><button id="sysCancel">Cancel</button><button id="sysSave" class="primary">Save</button></div>
+</dialog>
 <script src="app.js"></script>
 </body>
 </html>
